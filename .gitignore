@@ -24,6 +24,7 @@ dist/
 # IDE / Editor
 .vscode/
 .idea/
+.vs/
 
 # System files
 .DS_Store
