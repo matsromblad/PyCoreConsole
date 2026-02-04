@@ -1,0 +1,33 @@
+# Virtual environments
+.venv/
+venv/
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Logs and runtime files
+*.log
+*__accore.log
+
+# Distribution / packaging
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Testing
+.pytest_cache/
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# System files
+.DS_Store
+
+# Caches
+.mypy_cache/
+.cache/

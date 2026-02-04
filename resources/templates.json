@@ -1,0 +1,17 @@
+{
+  "templates": [
+    {
+      "name": "Purge + Audit (script) then save",
+      "items": [
+        { "path": "C:/CAD/scripts/purge_all.scr", "type": "scr", "invoke": "", "note": "purge all" },
+        { "path": "C:/CAD/scripts/audit.scr",      "type": "scr", "invoke": "", "note": "audit" }
+      ]
+    },
+    {
+      "name": "Load LISP and run named command",
+      "items": [
+        { "path": "C:/CAD/lisp/hello.lsp", "type": "lsp", "invoke": "HELLOWORLD", "note": "calls c:HELLOWORLD" }
+      ]
+    }
+  ]
+}

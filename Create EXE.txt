@@ -1,0 +1,2 @@
+
+pyinstaller --noconfirm --noconsole --name DWGBatchProcessor --add-data "resources/templates.json;resources" main.py
