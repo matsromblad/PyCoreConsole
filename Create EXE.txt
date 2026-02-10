@@ -1,2 +1,8 @@
 
+python -m venv .venv
+
+. .\.venv\Scripts\Activate.ps1
+
+pip install -r requirements.txt
+
 pyinstaller --noconfirm --noconsole --name DWGBatchProcessor --add-data "resources/templates.json;resources" main.py

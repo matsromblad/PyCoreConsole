@@ -17,6 +17,7 @@ from core.config_manager import (
 from core.models import ScriptItem, ScriptType
 from core.processor import prepare_jobs_for_dwgs
 from core.parallel_manager import ParallelManager
+from core.utils import sanitize_line
 from core import trust_manager
 from core.config_manager import ensure_app_dirs, APP_DIR
 from .templates_dialog import TemplatesDialog
@@ -24,38 +25,37 @@ from .templates_dialog import TemplatesDialog
 
 RES_TEMPLATES = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resources", "templates.json")
 
-import re
-_ansi_re = re.compile(r'\x1B\[[0-?]*[ -/]*[@-~]')
-_ctrl_re = re.compile(r'[\x00-\x08\x0B-\x1F\x7F]')
-
-def _sanitize_line(s: str) -> str:
-    if not s:
-        return s
-    s = _ansi_re.sub('', s)
-    s = _ctrl_re.sub('', s)
-    return s.strip()
-
 
 # --- Simple DnD list ---
 class DragDropList(QListWidget):
     def __init__(self, extensions: List[str], parent=None):
         super().__init__(parent)
-        self.extensions = [ext.lower() for ext in extensions]
+        self.extensions = [ext.lower() if ext.startswith('.') else f'.{ext.lower()}' for ext in extensions]
         self.setAcceptDrops(True)
         self.setDragDropMode(QListWidget.InternalMove)
         self.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self.setDefaultDropAction(Qt.DropAction.CopyAction)
 
     def dragEnterEvent(self, e):
         if e.mimeData().hasUrls():
-            e.acceptProposedAction()
+            # Check if any URL is a file with matching extension
+            for url in e.mimeData().urls():
+                path = url.toLocalFile()
+                if path and any(path.lower().endswith(ext) for ext in self.extensions):
+                    e.acceptProposedAction()
+                    return
+        e.ignore()
 
     def dragMoveEvent(self, e):
-        e.acceptProposedAction()
+        if e.mimeData().hasUrls():
+            e.acceptProposedAction()
+        else:
+            e.ignore()
 
     def dropEvent(self, e):
         for url in e.mimeData().urls():
             path = url.toLocalFile()
-            if any(path.lower().endswith(ext) for ext in self.extensions):
+            if path and any(path.lower().endswith(ext) for ext in self.extensions):
                 self.addItem(path)
         e.acceptProposedAction()
 
@@ -184,6 +184,33 @@ class MainWindow(QMainWindow):
         self.chk_logging.setChecked(self.settings.get("enable_logging", True))
         cf.addRow(self.chk_logging)
 
+        self.chk_show_console = QCheckBox("Show console windows (monitoring only - logs will NOT appear in this app)")
+        self.chk_show_console.setChecked(self.settings.get("show_console", False))
+        cf.addRow(self.chk_show_console)
+
+        # AutoCAD mode selection
+        mode_row = QHBoxLayout()
+        self.rb_accore = QPushButton("AutoCAD Core Console")
+        self.rb_accore.setCheckable(True)
+        self.rb_autocad = QPushButton("Regular AutoCAD (GUI)")
+        self.rb_autocad.setCheckable(True)
+        use_accore = self.settings.get("use_accore", True)
+        self.rb_accore.setChecked(use_accore)
+        self.rb_autocad.setChecked(not use_accore)
+        self.rb_accore.clicked.connect(lambda: self._set_autocad_mode(True))
+        self.rb_autocad.clicked.connect(lambda: self._set_autocad_mode(False))
+        mode_row.addWidget(self.rb_accore)
+        mode_row.addWidget(self.rb_autocad)
+        cf.addRow("AutoCAD Mode:", mode_row)
+
+        self.autocad_path = QLineEdit(self.settings.get("autocad_path", r"C:\Program Files\Autodesk\AutoCAD 2024\acad.exe"))
+        self.btn_browse_autocad = QPushButton("Browse…")
+        self.btn_browse_autocad.clicked.connect(self._browse_autocad)
+        autocad_row = QHBoxLayout()
+        autocad_row.addWidget(self.autocad_path, 1)
+        autocad_row.addWidget(self.btn_browse_autocad)
+        cf.addRow("acad.exe:", autocad_row)
+
         self.output_dir = QLineEdit(self.settings["last_output_dir"])
         self.btn_browse_out = QPushButton("Browse…")
         self.btn_browse_out.clicked.connect(self._browse_output)
@@ -280,6 +307,21 @@ class MainWindow(QMainWindow):
         f, _ = QFileDialog.getOpenFileName(self, "Select accoreconsole.exe", self.accore_path.text(), "Executable (*.exe)")
         if f:
             self.accore_path.setText(f)
+
+    def _browse_autocad(self):
+        f, _ = QFileDialog.getOpenFileName(self, "Select acad.exe", self.autocad_path.text(), "Executable (*.exe)")
+        if f:
+            self.autocad_path.setText(f)
+
+    def _set_autocad_mode(self, use_accore: bool):
+        """Toggle between AutoCAD Core Console and regular AutoCAD."""
+        self.rb_accore.setChecked(use_accore)
+        self.rb_autocad.setChecked(not use_accore)
+        # Update visibility of path fields
+        self.accore_path.setEnabled(use_accore)
+        self.btn_browse_accore.setEnabled(use_accore)
+        self.autocad_path.setEnabled(not use_accore)
+        self.btn_browse_autocad.setEnabled(not use_accore)
 
     def _templates(self):
         dlg = TemplatesDialog(self.templates, self)
@@ -434,6 +476,8 @@ class MainWindow(QMainWindow):
 
         # Save settings
         self.settings["accore_path"] = self.accore_path.text()
+        self.settings["autocad_path"] = self.autocad_path.text()
+        self.settings["use_accore"] = self.rb_accore.isChecked()
         self.settings["language"] = self.cmb_lang.currentText()
         self.settings["product"] = self.product.text().strip()
         self.settings["max_parallel"] = self.spin_parallel.value()
@@ -441,12 +485,15 @@ class MainWindow(QMainWindow):
         self.settings["quit_at_end"] = self.chk_quit.isChecked()
         self.settings["copy_to_output"] = self.chk_copy.isChecked()
         self.settings["enable_logging"] = self.chk_logging.isChecked()
+        self.settings["show_console"] = self.chk_show_console.isChecked()
         self.settings["last_output_dir"] = self.output_dir.text()
         save_settings(self.settings)
 
-        # Validate accore path
-        if not os.path.isfile(self.settings["accore_path"]):
-            QMessageBox.critical(self, "Invalid path", "accoreconsole.exe not found.")
+        # Validate paths based on mode
+        exe_path = self.settings["accore_path"] if self.settings["use_accore"] else self.settings["autocad_path"]
+        exe_name = "accoreconsole.exe" if self.settings["use_accore"] else "acad.exe"
+        if not os.path.isfile(exe_path):
+            QMessageBox.critical(self, "Invalid path", f"{exe_name} not found at:\n{exe_path}")
             return
 
         self._jobs_total = len(jobs)
@@ -469,10 +516,13 @@ class MainWindow(QMainWindow):
         # Build manager (opt-out of emitting logs if logging disabled)
         self.manager = ParallelManager(
             accore_path=self.settings["accore_path"],
+            autocad_path=self.settings["autocad_path"],
+            use_accore=self.settings["use_accore"],
             language=self.settings["language"],
             product=self.settings["product"],
             max_parallel=self.spin_parallel.value(),
             emit_logs=self.settings.get("enable_logging", True),
+            show_console=self.settings.get("show_console", False),
             parent=self
         )
         self.manager.job_started.connect(self._on_job_started)
@@ -508,6 +558,7 @@ class MainWindow(QMainWindow):
             self._set_status(r, "Running")
 
     def _append_to_file(self, r: int, msg: str, error: bool = False):
+        """Append message to per-job log file and console."""
         log_path_item = self.table.item(r, 3)
         if log_path_item is None:
             return
@@ -516,7 +567,7 @@ class MainWindow(QMainWindow):
         if not log_path or log_path == "Disabled":
             return
         # Sanitize message (remove ANSI/control chars)
-        msg = _sanitize_line(msg)
+        msg = sanitize_line(msg)
         if not msg:
             return
         try:
